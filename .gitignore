@@ -1,0 +1,27 @@
+# Secrets and local config: never commit
+.env
+.env.*
+!.env.example
+.dev.vars
+*.pem
+*.key
+secrets/
+
+# Personal data: vaults, transcripts, test results from real sessions
+vault/
+*-vault/
+test-results/
+state/
+*.sqlite
+*.sqlite3
+*.db
+*.log
+
+# Tooling
+node_modules/
+.wrangler/
+__pycache__/
+*.pyc
+.venv/
+dist/
+.DS_Store
