@@ -15,7 +15,8 @@ import {
 } from './auth.js';
 
 const SECURITY_HEADERS = {
-  'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer', 'x-frame-options': 'DENY',
+  // same-origin, not no-referrer: with no-referrer, browsers send `Origin: null` on our own form posts.
+  'x-content-type-options': 'nosniff', 'referrer-policy': 'same-origin', 'x-frame-options': 'DENY',
   // No form-action: Chrome applies it to the redirect after the consent form, which goes to the AI app's own site.
   'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'",
 };
@@ -23,7 +24,14 @@ const secure = (res) => { const r = new Response(res.body, res); for (const [k, 
 const json = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } });
 const html = (markup, status = 200, extra = {}) => secure(new Response(markup, { status, headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', ...extra } }));
 const redirect = (location, extra = {}) => secure(new Response(null, { status: 303, headers: { location, 'cache-control': 'no-store', ...extra } }));
-const crossSite = (req, url) => { const o = req.headers.get('origin'); return Boolean(o) && o !== url.origin; };
+// Form posts must come from our own pages. Browsers send Sec-Fetch-Site, which pages can't fake; without it
+// (older browsers, scripts) fall back to Origin, where a missing Origin is allowed and `null` is not.
+function crossSite(req, url) {
+  const site = req.headers.get('sec-fetch-site');
+  if (site) return site !== 'same-origin' && site !== 'none';
+  const o = req.headers.get('origin');
+  return Boolean(o) && o !== url.origin;
+}
 const clientIp = (req) => req.headers.get('cf-connecting-ip') || 'unknown';
 
 export const OAUTH_PATH = /^\/(mcp|authorize|oauth\/(token|register)|\.well-known\/oauth-[\w-]+(\/mcp)?)$/;

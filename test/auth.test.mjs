@@ -60,6 +60,19 @@ test('sign-in: right password sets a session cookie, wrong ones are counted and 
   assert.equal((await call(makeEnv({ PASSWORD_HASH: '' }), '/login', { method: 'POST', body: form({ password: PASSWORD }) })).status, 503);
 });
 
+test('form posts from our own pages work the way real browsers send them; cross-site ones are refused', async () => {
+  const env = makeEnv();
+  const post = (headers) => call(env, '/login', { method: 'POST', headers, body: form({ password: PASSWORD, next: '/' }) });
+  // A browser on a page with a strict referrer policy sends Origin: null, but Sec-Fetch-Site still says same-origin.
+  assert.equal((await post({ origin: 'null', 'sec-fetch-site': 'same-origin' })).status, 303);
+  assert.equal((await post({ origin: ORIGIN, 'sec-fetch-site': 'same-origin' })).status, 303);
+  assert.equal((await post({ origin: 'https://evil.example', 'sec-fetch-site': 'cross-site' })).status, 403);
+  assert.equal((await post({ origin: 'https://sub.talisman.test', 'sec-fetch-site': 'same-site' })).status, 403);
+  assert.equal((await post({ origin: 'null' })).status, 403); // no Sec-Fetch-Site: a null origin isn't trusted
+  const page = await call(env, '/login');
+  assert.equal(page.headers.get('referrer-policy'), 'same-origin'); // so browsers send our real origin on form posts
+});
+
 test('OAuth: register, sign in, approve, swap the code for a token, then use the connector', async () => {
   const env = await seeded({ OAUTH_KV: kv() });
   const meta = await (await call(env, '/.well-known/oauth-protected-resource/mcp')).json();
