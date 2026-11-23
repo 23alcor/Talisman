@@ -114,7 +114,7 @@ test('OAuth: register, sign in, approve, swap the code for a token, then use the
   const { access_token } = await tok.json();
   const listed = await rpc(env, 'tools/list', {}, access_token);
   assert.equal(listed.status, 200);
-  assert.equal(listed.body.result.tools.length, 6);
+  assert.equal(listed.body.result.tools.length, 9);
   const who = await rpc(env, 'tools/call', { name: 'whoami', arguments: {} }, access_token);
   assert.equal(JSON.parse(who.body.result.content[0].text).name, 'Sam');
 });

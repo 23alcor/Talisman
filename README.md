@@ -4,7 +4,7 @@
 
 Talisman is a context manager for AI. Your notes are a plain Markdown vault (Obsidian-compatible) and stay the source of truth. Every AI you use — Claude, ChatGPT, Grok, Claude Code, Codex, Cursor, on any device — reads the same context through one connector, and writes back through one safe path.
 
-> **Status: early.** Step 1 works: a self-hosted connector and read mirror on Cloudflare's free plan (see [Set up](#set-up)). AIs can read your notes; writing back (the queue and applier) is step 2.
+> **Status: early.** A self-hosted connector on Cloudflare's free plan (see [Set up](#set-up)). AIs can read your notes, save session notes and create new notes; writes go through a queue and one applier on the machine that holds your vault.
 
 ## The problem
 
@@ -102,7 +102,36 @@ It sends only notes that changed and removes notes you deleted. `--exclude Templ
   `claude mcp add --transport http talisman https://talisman.YOU.workers.dev/mcp --header "Authorization: Bearer $(cat ~/.config/talisman/mcp-token)"`
 - **Other terminal tools:** any client that speaks MCP over HTTP can send `Authorization: Bearer <mcp-token>`.
 
-The connector has six read tools: `whoami`, `search_notes`, `read_note`, `list_notes`, `related_notes` and `recent_sessions`. They can't change anything.
+The connector has six read tools (`whoami`, `search_notes`, `read_note`, `list_notes`, `related_notes`, `recent_sessions`) and three write tools (`log_session`, `create_note`, `write_status`).
+
+**5. Let AIs write**
+
+Writes wait in a queue until the applier on your vault machine saves them. Run it on the one machine that holds your main vault, and nowhere else:
+
+```sh
+python3 sync/talisman-applier.py --vault ~/Notes --url https://talisman.YOU.workers.dev \
+  --token-file ~/.config/talisman/sync-token --daily-log --project-log
+```
+
+- `log_session` writes a session note to `Sessions/YYYY-MM/`. When the AI sends an update with the same `session_id`, the applier rewrites that note in place. It won't touch a session note you've edited by hand.
+- `create_note` adds a new note to an existing folder. It never overwrites a note.
+- `--daily-log` and `--project-log` add one link line under `## Log` in that day's daily note and in the project's note. The daily note is made from your Obsidian daily-note template if it doesn't exist yet.
+- Writes that look like they contain a password, key or token are refused.
+- If the applier is offline, AIs are told that writing is paused, that their write is queued, and that reading still works.
+
+It runs until stopped, so run it as a service. With systemd (`~/.config/systemd/user/talisman-applier.service`):
+
+```ini
+[Service]
+ExecStart=/usr/bin/python3 /path/to/Talisman/sync/talisman-applier.py --vault /path/to/Notes --url https://talisman.YOU.workers.dev --token-file %h/.config/talisman/sync-token --daily-log --project-log
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target
+```
+
+After updating Talisman, run `npm run db:migrate` before `npm run deploy`.
 
 ### Development
 
@@ -116,7 +145,7 @@ npm run db:migrate:local && npm run dev
 ## Roadmap
 
 1. ~~Connector and read mirror~~ (done)
-2. Write queue, applier, and the "writes paused" flow
+2. ~~Write queue, applier, and the "writes paused" flow~~ (done: session notes and new notes; handoffs next)
 3. Capture hooks for Claude Code and Codex
 4. Health: heartbeats, a status page and alerts that don't depend on your home machine
 5. Search by meaning, not just keywords

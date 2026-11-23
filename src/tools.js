@@ -1,6 +1,7 @@
 // The connector's read tools. They answer from the read mirror (the `notes` table), never from the vault itself,
 // so they keep working when the owner's computers are off. Every result says how fresh the mirror is.
 import { addDays, localNow } from './config.js';
+import { writerStatus } from './writes.js';
 
 export class ToolError extends Error {}
 
@@ -11,7 +12,7 @@ const tool = (name, description, properties = {}, required = []) => ({
 });
 
 export const READ_TOOLS = [
-  tool('whoami', 'Who the owner is: their About Me note (background, work, projects, goals, how they like answers), plus the current date, time and time zone, and how fresh the notes mirror is. Use it when the answer depends on who they are or what they are working on.'),
+  tool('whoami', 'Who the owner is: their About Me note (background, work, projects, goals, how they like answers), plus the current date, time and time zone, how fresh the notes mirror is, and whether writing is available or paused. Use it when the answer depends on who they are or what they are working on.'),
   tool('search_notes', 'Search their notes (projects, courses, areas, session notes, daily notes) by words. Returns paths and matching snippets; read a note with read_note.', {
     query: S('Words to look for'), folder: S('Optional folder prefix to search within'), limit: { type: 'integer', description: 'Max results, default 5, up to 10' },
   }, ['query']),
@@ -90,7 +91,7 @@ export function readTools(env, cfg) {
     async whoami() {
       const about = await db.prepare('SELECT path, body FROM notes WHERE lower(title) = lower(?1) ORDER BY length(path) LIMIT 1').bind(cfg.aboutNote).first();
       return {
-        name: cfg.owner || null, now: localNow(cfg.tz), time_zone: cfg.tz, mirror: await mirrorStatus(db),
+        name: cfg.owner || null, now: localNow(cfg.tz), time_zone: cfg.tz, mirror: await mirrorStatus(db), writing: await writerStatus(env),
         about_me_path: about?.path || null,
         about_me_truncated: (about?.body.length || 0) > 4000,
         about_me: about?.body.slice(0, 4000) || `No "${cfg.aboutNote}" note yet. Use search_notes and recent_sessions to learn about them.`,

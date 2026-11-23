@@ -22,7 +22,7 @@ test('initialize, ping, tools/list and notifications', async () => {
   assert.match(init.body.result.instructions, /Sam's personal context/);
   assert.deepEqual((await rpc(env, 'ping')).body.result, {});
   const names = (await rpc(env, 'tools/list')).body.result.tools.map((t) => t.name);
-  assert.deepEqual(names, ['whoami', 'search_notes', 'read_note', 'list_notes', 'related_notes', 'recent_sessions']);
+  assert.deepEqual(names, ['whoami', 'search_notes', 'read_note', 'list_notes', 'related_notes', 'recent_sessions', 'log_session', 'create_note', 'write_status']);
   assert.equal((await rpc(env, 'nope')).body.error.code, -32601);
   const note = await call(env, '/mcp', { method: 'POST', headers: { authorization: `Bearer ${env.TALISMAN_TOKEN}` }, body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) });
   assert.equal(note.status, 202);

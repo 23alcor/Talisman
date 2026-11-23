@@ -4,11 +4,13 @@
 //   /authorize, /oauth/*   OAuth for connector apps; approving = signing in with the owner password and clicking Allow
 //   /login, /logout        owner sign-in (only needed for OAuth)
 //   /api/sync/notes        read mirror updates from the sync client (bearer SYNC_TOKEN)
+//   /api/applier/*         the write queue's applier on the vault machine (bearer SYNC_TOKEN)
 //   /health                liveness check
 import { AuthorizationError, CimdFetchError, OAuthProvider } from '@cloudflare/workers-oauth-provider';
 import { config } from './config.js';
 import { mcp } from './mcp.js';
 import { syncNotes } from './sync.js';
+import { applierApi } from './writes.js';
 import {
   authConfigured, bearer, checkPassword, clearFailures, consentPage, lockedOut, loginPage, recordFailure,
   safeNext, sameText, sessionCookie, signedIn, statusPage,
@@ -113,9 +115,9 @@ export default {
     const url = new URL(req.url);
     try {
       if (url.pathname === '/health') return secure(json({ ok: true, service: 'talisman' }));
-      if (url.pathname === '/api/sync/notes') {
+      if (url.pathname === '/api/sync/notes' || url.pathname.startsWith('/api/applier/')) { // the vault machine only
         if (!env.SYNC_TOKEN || !sameText(bearer(req), env.SYNC_TOKEN)) return secure(json({ error: 'unauthorized' }, 401));
-        return secure(await syncNotes(req, env));
+        return secure(url.pathname === '/api/sync/notes' ? await syncNotes(req, env) : await applierApi(req, env, url, config(env)));
       }
       if (OAUTH_PATH.test(url.pathname)) {
         if (url.pathname === '/mcp' && env.TALISMAN_TOKEN && sameText(bearer(req), env.TALISMAN_TOKEN)) return secure(await mcp(req, env, config(env)));

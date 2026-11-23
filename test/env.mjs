@@ -35,7 +35,7 @@ export function kv() {
 export function makeEnv(extra = {}) {
   return {
     DB: database(), SYNC_TOKEN, TALISMAN_TOKEN, OWNER_NAME: 'Sam', TIMEZONE: 'America/New_York', ABOUT_NOTE: 'About Me', SESSIONS_FOLDER: 'Sessions',
-    PASSWORD_HASH: passwordHash(PASSWORD), SESSION_SECRET: 'test-session-secret', ...extra,
+    PASSWORD_HASH: passwordHash(PASSWORD), SESSION_SECRET: 'test-session-secret', WRITE_WAIT_MS: 0, ...extra,
   };
 }
 

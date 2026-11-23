@@ -1,6 +1,7 @@
 // The connector: an MCP server (Model Context Protocol) at /mcp, so any AI client can read the owner's context.
 // Stateless Streamable HTTP: each POST is one JSON-RPC message, answered as JSON. Auth is checked in index.js.
 import { READ_TOOLS, ToolError, readTools } from './tools.js';
+import { WRITE_TOOLS, writeTools } from './writes.js';
 
 const VERSION = '0.1.0';
 const MAX_RESULT = 24000; // characters per tool result, so one call can't flood a model's context
@@ -9,13 +10,15 @@ const json = (data, status = 200) => new Response(JSON.stringify(data), { status
 const rpc = (id, result) => json({ jsonrpc: '2.0', id, result });
 const rpcError = (id, code, message, status = 200) => json({ jsonrpc: '2.0', id, error: { code, message } }, status);
 
-export const TOOLS = READ_TOOLS;
+export const TOOLS = READ_TOOLS.concat(WRITE_TOOLS);
 
 const instructions = (cfg) => [
   `This server is Talisman: ${cfg.owner ? cfg.owner + "'s" : 'the owner\'s'} personal context, read from their notes vault.`,
   'Call whoami when personal background matters and use it to tailor answers. Look things up (search_notes, recent_sessions) before asking them something their notes might answer.',
   'related_notes follows links from a note to connected projects, sessions and ideas. Use read_note with section, offset and max_chars instead of reading whole long notes.',
   'Results come from a mirror of the vault; whoami reports when it was last synced.',
+  'At the end of a real work or study session, save it with log_session (and update it with the same session_id later). Create notes with create_note only when asked.',
+  'Writes are saved by their vault machine: only say something is saved when saved is true. If writing is paused, tell them it is queued and that reading still works.',
 ].join(' ');
 
 export async function mcp(req, env, cfg) {
@@ -38,7 +41,7 @@ export async function mcp(req, env, cfg) {
       let text, isError = false;
       try {
         const name = String(p.name || '');
-        const handlers = readTools(env, cfg);
+        const handlers = { ...readTools(env, cfg), ...writeTools(env, cfg) };
         if (!TOOLS.some((t) => t.name === name) || !handlers[name]) throw new ToolError(`Unknown tool ${name}`);
         const args = p.arguments && typeof p.arguments === 'object' && !Array.isArray(p.arguments) ? p.arguments : {};
         text = JSON.stringify(await handlers[name](args));
