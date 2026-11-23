@@ -65,6 +65,11 @@ class Applier(unittest.TestCase):
         self.assertIn("- 2026-11-01 old entry\n- 2026-11-22 [[2026-11-22 Lantern - Ship the beta|Ship the beta]] (claude)\n\n## Ideas\nmine", project)
         self.assertEqual(len(touched), 3)
         self.assertEqual(ap.record(self.vault, path)["path"], rel)
+        mask = os.umask(0); os.umask(mask)
+        self.assertEqual(path.stat().st_mode & 0o777, 0o666 & ~mask)  # not mkstemp's 600
+        os.chmod(Path(self.vault, "Projects/Lantern/Lantern.md"), 0o640)
+        ap.apply(self.vault, session(session_id="ses_perm1234", title="Another"), CFG, ARGS)
+        self.assertEqual(Path(self.vault, "Projects/Lantern/Lantern.md").stat().st_mode & 0o777, 0o640)  # existing notes keep theirs
 
     def test_updates_rewrite_in_place_and_retries_add_nothing(self):
         path, _ = ap.apply(self.vault, session(), CFG, ARGS)

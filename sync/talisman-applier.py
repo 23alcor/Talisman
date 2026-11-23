@@ -101,14 +101,25 @@ def inside(vault, rel):
     return path
 
 
+def file_mode(path):
+    """Keep an existing note's permissions; new notes get the usual ones (mkstemp alone would make them 600)."""
+    if path.exists():
+        return path.stat().st_mode & 0o777
+    mask = os.umask(0)
+    os.umask(mask)
+    return 0o666 & ~mask
+
+
 def atomic_write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
+    mode = file_mode(path)
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".talisman-", suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
             f.write(text)
             f.flush()
             os.fsync(f.fileno())
+        os.chmod(tmp, mode)
         os.replace(tmp, path)
     finally:
         if os.path.exists(tmp):
