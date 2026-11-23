@@ -154,11 +154,18 @@ Claude Code: add the hook to `~/.claude/settings.json`, for both `Stop` and `Ses
 } }
 ```
 
-Codex: in `~/.codex/config.toml`:
+Codex: add the same two hooks to `~/.codex/hooks.json`. `--background` returns control to Codex at once, so it doesn't wait for the upload:
 
-```toml
-notify = ["python3", "/path/to/Talisman/capture/talisman-capture.py", "codex", "--url", "https://talisman.YOU.workers.dev"]
+```json
+{ "hooks": {
+  "Stop":       [{ "hooks": [{ "type": "command", "timeout": 30,
+                   "command": "python3 /path/to/Talisman/capture/talisman-capture.py codex --background --url https://talisman.YOU.workers.dev" }] }],
+  "SessionEnd": [{ "hooks": [{ "type": "command", "timeout": 30,
+                   "command": "python3 /path/to/Talisman/capture/talisman-capture.py codex --background --url https://talisman.YOU.workers.dev" }] }]
+} }
 ```
+
+On older Codex versions without hooks, use `notify = ["python3", "/path/to/Talisman/capture/talisman-capture.py", "codex", "--url", "https://talisman.YOU.workers.dev"]` at the top of `~/.codex/config.toml`. Codex runs only one notify program, so this replaces any you already have.
 
 The hook reads the token from `~/.config/talisman/mcp-token`. `TALISMAN_CAPTURE=off` turns it off. `TALISMAN_CAPTURE_SKIP=/path/a:/path/b` never sends chats that ran in those folders. Chats under 1200 characters are skipped. If Talisman can't be reached, the hook tries again on its next run. It never slows or fails the agent, and its log is in `~/.local/state/talisman/capture.log`. To see exactly what would be sent for a chat, without sending anything: `python3 capture/talisman-capture.py build claude-code <chat file>`.
 

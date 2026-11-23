@@ -8,7 +8,9 @@ place. Once a chat has been quiet for a while (or ends), Talisman summarizes it 
 
 Claude Code (~/.claude/settings.json), Stop and SessionEnd hooks:
     python3 /path/to/Talisman/capture/talisman-capture.py claude-code --url https://talisman.YOU.workers.dev
-Codex (~/.codex/config.toml):
+Codex (~/.codex/hooks.json), Stop and SessionEnd hooks; --background so Codex doesn't wait on the upload:
+    python3 /path/to/Talisman/capture/talisman-capture.py codex --background --url https://talisman.YOU.workers.dev
+Older Codex without hooks (~/.codex/config.toml; Codex runs only one notify program):
     notify = ["python3", "/path/to/Talisman/capture/talisman-capture.py", "codex", "--url", "https://talisman.YOU.workers.dev"]
 Try it on a chat file without sending anything:
     python3 talisman-capture.py build claude-code ~/.claude/projects/<project>/<session>.jsonl
@@ -320,6 +322,8 @@ def main(argv):
     p.add_argument("rest", nargs="*", help="build: <source> <chat file>; codex: the JSON Codex passes")
     p.add_argument("--url", default=os.environ.get("TALISMAN_URL"))
     p.add_argument("--token-file", default=os.path.expanduser("~/.config/talisman/mcp-token"))
+    p.add_argument("--background", action="store_true",
+                   help="return to the agent at once and send in the background (for agents that wait on their hooks)")
     a = p.parse_intermixed_args(argv)  # Codex appends its JSON after our own --url and --token-file
 
     if a.mode == "build":
@@ -333,11 +337,14 @@ def main(argv):
         token = os.environ.get("TALISMAN_TOKEN") or Path(a.token_file).expanduser().read_text().strip()
         if not a.url or not token:
             raise ValueError("set --url and a token (--token-file or TALISMAN_TOKEN)")
-        if a.mode == "claude-code":
+        if a.mode == "claude-code" or not a.rest:
+            # A hook (Claude Code, or Codex's hooks.json): one JSON object on stdin, with the chat file's path.
             hook = json.loads(sys.stdin.read() or "{}")
-            job = ("claude-code", hook.get("transcript_path"), hook.get("cwd", ""), hook.get("session_id", ""),
-                   hook.get("hook_event_name") == "SessionEnd")
-        else:  # codex: notify passes one JSON argument after each turn
+            path, sid = hook.get("transcript_path"), hook.get("session_id", "")
+            if a.mode == "codex" and not path and sid:
+                path = codex_rollout(sid)
+            job = (a.mode, path, hook.get("cwd", ""), sid, hook.get("hook_event_name") == "SessionEnd")
+        else:  # codex's notify setting: one JSON argument after each turn
             event = json.loads(a.rest[-1]) if a.rest else {}
             if event.get("type") != "agent-turn-complete":
                 return 0
@@ -348,6 +355,13 @@ def main(argv):
                 return 0
         if not job[1] or not os.path.isfile(job[1]):
             return 0
+        if a.background and hasattr(os, "fork") and os.fork() > 0:
+            return 0  # the agent carries on; the child below does the sending
+        if a.background and hasattr(os, "fork"):
+            os.setsid()  # detach, and let go of the agent's pipes so it isn't left waiting on us
+            null = os.open(os.devnull, os.O_RDWR)
+            for fd in (0, 1, 2):
+                os.dup2(null, fd)
         retry_pending(a.url, token)
         try:
             log(f"{a.mode}: {capture(job[0], job[1], a.url, token, job[2], job[3], job[4])}")
