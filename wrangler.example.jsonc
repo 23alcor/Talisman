@@ -1,0 +1,22 @@
+// Copy this file to wrangler.jsonc (git-ignored) and fill in your own IDs. See README → Set up.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "talisman",
+  "main": "src/index.js",
+  "compatibility_date": "2026-09-01",
+  // global_fetch_strictly_public lets the OAuth provider fetch client metadata documents safely.
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "d1_databases": [
+    { "binding": "DB", "database_name": "talisman", "database_id": "YOUR_D1_DATABASE_ID", "migrations_dir": "migrations" }
+  ],
+  // Grants for connector apps (claude.ai, ChatGPT…). Create with: npx wrangler kv namespace create OAUTH_KV
+  "kv_namespaces": [{ "binding": "OAUTH_KV", "id": "YOUR_KV_NAMESPACE_ID" }],
+  "observability": { "enabled": true },
+  "vars": {
+    "OWNER_NAME": "",                 // your first name, used in the connector's instructions to AIs
+    "TIMEZONE": "America/New_York",   // IANA time zone for dates in tool results
+    "ABOUT_NOTE": "About Me",         // title of the note whoami returns
+    "SESSIONS_FOLDER": "Sessions"     // where session notes live, for recent_sessions
+  }
+  // Secrets (never in this file): TALISMAN_TOKEN, SYNC_TOKEN, PASSWORD_HASH, SESSION_SECRET. See README.
+}

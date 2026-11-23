@@ -1,0 +1,25 @@
+{
+  "name": "talisman",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A context manager for AI: one connector, your Markdown notes as the source of truth.",
+  "license": "MIT",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:migrate": "wrangler d1 migrations apply talisman --remote",
+    "db:migrate:local": "wrangler d1 migrations apply talisman --local",
+    "set-password": "node scripts/set-password.mjs",
+    "test": "node --import ./test/shims.mjs --test test/*.test.mjs && python3 -B -m unittest discover -s sync"
+  },
+  "engines": {
+    "node": ">=22.13"
+  },
+  "dependencies": {
+    "@cloudflare/workers-oauth-provider": "^1.2.4"
+  },
+  "devDependencies": {
+    "wrangler": "^4.150.0"
+  }
+}
