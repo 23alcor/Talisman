@@ -12,11 +12,16 @@
   // Grants for connector apps (claude.ai, ChatGPT…). Create with: npx wrangler kv namespace create OAUTH_KV
   "kv_namespaces": [{ "binding": "OAUTH_KV", "id": "YOUR_KV_NAMESPACE_ID" }],
   "observability": { "enabled": true },
+  // Every 5 minutes: summarize captured chats that have gone quiet.
+  "triggers": { "crons": ["*/5 * * * *"] },
   "vars": {
     "OWNER_NAME": "",                 // your first name, used in the connector's instructions to AIs
     "TIMEZONE": "America/New_York",   // IANA time zone for dates in tool results
     "ABOUT_NOTE": "About Me",         // title of the note whoami returns
-    "SESSIONS_FOLDER": "Sessions"     // where session notes live, for recent_sessions
+    "SESSIONS_FOLDER": "Sessions",    // where session notes live, for recent_sessions
+    "SUMMARY_MODEL": "gpt-5-mini",    // model that summarizes captured chats (OpenAI Responses API)
+    "CAPTURE_QUIET_MINUTES": "10"     // summarize a chat once it has been quiet this long
   }
-  // Secrets (never in this file): TALISMAN_TOKEN, SYNC_TOKEN, PASSWORD_HASH, SESSION_SECRET. See README.
+  // Secrets (never in this file): TALISMAN_TOKEN, SYNC_TOKEN, PASSWORD_HASH, SESSION_SECRET, and OPENAI_API_KEY for
+  // capture summaries. Optional vars: SUMMARY_BASE_URL (another OpenAI-compatible provider), SUMMARY_REASONING. See README.
 }

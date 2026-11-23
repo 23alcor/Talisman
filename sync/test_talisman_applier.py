@@ -131,6 +131,36 @@ class Applier(unittest.TestCase):
         finally:
             outside.cleanup()
 
+    def test_captured_chat_keeps_its_transcript(self):
+        asked = []
+        fetch = lambda cid: asked.append(cid) or "User: hi\n\nAssistant: ```code``` reply"
+        args = SimpleNamespace(daily_log=False, project_log=False, fetch_transcript=fetch)
+        w = session(session_id="cap_abc123def456", transcript_capture="abc123def456", concepts=["Battery life", "[[Odd]]"])
+        path, touched = ap.apply(self.vault, w, CFG, args)
+        self.assertEqual(asked, ["abc123def456"])
+        note = path.read_text()
+        self.assertIn("Concepts: [[Battery life]] · [[Odd]]", note)
+        self.assertIn(f"- Full transcript: [[Sessions/Transcripts/{path.stem}|transcript]]", note)
+        t = self.read(f"Sessions/Transcripts/{path.stem}.md")
+        self.assertIn(f'type: transcript\nsession: "[[{path.stem}]]"', t)
+        self.assertIn("````text\nUser: hi\n\nAssistant: ```code``` reply\n````", t)  # the fence outgrows the chat's own
+        self.assertEqual(touched, [path])  # transcripts stay out of the read mirror
+        # the next update finds the session note, not its transcript (they share the session id)
+        path2, _ = ap.apply(self.vault, dict(w, revision=2), CFG, args)
+        self.assertEqual(path2, path)
+        # a transcript note someone else wrote is never replaced
+        other = Path(self.vault, "Sessions/Transcripts/mine.md")
+        other.write_text("---\ncreated_by: me\n---\nmine")
+        ap.write_transcript(self.vault, "Sessions/Transcripts/mine.md", "x", "mine", "ai", "cap_other")
+        self.assertEqual(other.read_text(), "---\ncreated_by: me\n---\nmine")
+        # a capture that's gone: the note is saved without a transcript link
+        gone = SimpleNamespace(daily_log=False, project_log=False, fetch_transcript=lambda cid: None)
+        p3, _ = ap.apply(self.vault, session(session_id="cap_gone12345", transcript_capture="gone12345"), CFG, gone)
+        self.assertNotIn("Full transcript", p3.read_text())
+        no = SimpleNamespace(daily_log=False, project_log=False, fetch_transcript=fetch, no_transcripts=True)
+        p4, _ = ap.apply(self.vault, session(session_id="cap_none12345", transcript_capture="none12345"), CFG, no)
+        self.assertNotIn("Full transcript", p4.read_text())
+
     def test_helpers(self):
         self.assertEqual(ap.moment("dddd, MMMM D, YYYY", date(2026, 1, 5)), "Monday, January 5, 2026")
         self.assertEqual(ap.moment("YYYY/[Week] MM-DD", date(2026, 1, 5)), "2026/Week 01-05")

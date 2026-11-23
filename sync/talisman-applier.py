@@ -10,6 +10,8 @@ vault, and it never edits or deletes what you wrote:
   create_note  a new note in an existing folder. It never overwrites a note.
   --daily-log / --project-log  also add one link line under "## Log" in that day's daily note (created from
                your Obsidian daily-note template if missing) and in the session's project note.
+  Captured chats (from capture/talisman-capture.py) also get their transcript saved in Sessions/Transcripts/ and
+  linked from the session note, unless --no-transcripts.
 
     python3 talisman-applier.py --vault ~/Notes --url https://talisman.example.workers.dev \\
         --token-file ~/.config/talisman/sync-token --daily-log --project-log
@@ -67,6 +69,19 @@ def api(url, token, path, body, timeout=60):
         raise Offline(f"Talisman answered {e.code}: {detail}")
     except (urllib.error.URLError, OSError, ValueError) as e:
         raise Offline(f"could not reach Talisman: {e}")
+
+
+def fetch_text(url, token, path, timeout=60):
+    req = urllib.request.Request(url + path, headers={"authorization": f"Bearer {token}", "user-agent": "talisman-applier/0.1"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.read().decode("utf-8")
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return None  # the capture is gone: save the note without a transcript
+        raise Offline(f"Talisman answered {e.code} for a transcript")
+    except (urllib.error.URLError, OSError) as e:
+        raise Offline(f"could not fetch a transcript: {e}")
 
 
 # ---------- vault helpers ----------
@@ -229,6 +244,9 @@ def session_text(p, revision, name):
              f'date: "{p["date"]}"', f'start: "{p.get("start", "")}"', f'end: "{p.get("end", "")}"', f"tool: {tool}",
              "created_by: talisman", f"talisman_session: {p['session_id']}", f"talisman_rev: {revision}",
              "tags:", "  - session", f"  - {category}", "---", f"# {p['title']}", "", "## Summary", p.get("summary") or "- None"]
+    concepts = [re.sub(r"[\[\]|#^]", "", str(c)).strip() for c in (p.get("concepts") or [])][:5]
+    if any(concepts):
+        lines += ["", "Concepts: " + " · ".join(f"[[{c}]]" for c in concepts if c)]
     if study:
         sections = [("What I covered", p.get("changes"), False), ("Key ideas", p.get("decisions"), False),
                     ("Still unclear", p.get("still_unclear"), False), ("Review next", p.get("next_steps"), True)]
@@ -247,7 +265,8 @@ def find_session(vault, sessions_folder, sid):
         return None
     for path in walk_notes(vault, sessions_folder):
         head = path.read_text(encoding="utf-8", errors="replace")[:2000]
-        if f"talisman_session: {sid}\n" in head and frontmatter(head).get("created_by") == "talisman":
+        fm = frontmatter(head) if f"talisman_session: {sid}\n" in head else {}
+        if fm.get("created_by") == "talisman" and fm.get("type") == "session":  # not its transcript, which shares the id
             return path
     return None
 
@@ -261,7 +280,21 @@ def free_name(vault, base):
     return name
 
 
-def apply_session(vault, w, cfg, daily_log=False, project_log=False):
+def write_transcript(vault, rel, text, name, tool, sid):
+    """The chat's transcript as its own note, rewritten as the chat grows. Never replaces a note Talisman didn't write."""
+    path = inside(vault, rel)
+    if path.exists():
+        fm = frontmatter(path.read_text(encoding="utf-8", errors="replace")[:2000])
+        if fm.get("created_by") != "talisman" or fm.get("talisman_session") != sid:
+            log(f"left {rel} alone: it isn't this session's transcript")
+            return
+    longest = max((len(m) for m in re.findall(r"`+", text)), default=0)
+    fence = "`" * max(3, longest + 1)
+    atomic_write(path, "\n".join(["---", "type: transcript", f'session: "[[{name}]]"', f"source: {tool}", "created_by: talisman",
+                                  f"talisman_session: {sid}", "---", f"Transcript for [[{name}]].", "", fence + "text", text.rstrip(), fence, ""]))
+
+
+def apply_session(vault, w, cfg, daily_log=False, project_log=False, fetch_transcript=None):
     p, revision = w["payload"], int(w["revision"])
     sessions = (cfg.get("sessions_folder") or "Sessions").strip("/")
     existing = find_session(vault, sessions, p["session_id"])
@@ -279,10 +312,17 @@ def apply_session(vault, w, cfg, daily_log=False, project_log=False):
         title = BAD.sub(" ", p["title"]).strip() or "Session"
         name = free_name(vault, re.sub(r"\s+", " ", f"{p['date']} {label} - {title}").strip()[:150])
         path = inside(vault, f"{sessions}/{p['date'][:7]}/{name}.md")
+    name, tool = path.stem, re.sub(r"[^\w-]", "", str(p.get("source") or "ai").lower()) or "ai"
+    transcript = None
+    if p.get("transcript_capture") and fetch_transcript:  # a captured chat: keep its transcript next to the note
+        transcript = fetch_transcript(p["transcript_capture"])
+        if transcript:
+            p = {**p, "links": list(p.get("links") or []) + [f"Full transcript: [[{sessions}/Transcripts/{name}|transcript]]"]}
     if not already:
         atomic_write(path, session_text(p, revision, path.stem))
-    touched = [path]  # the log lines below check for themselves, so a retry never adds them twice
-    name, tool = path.stem, re.sub(r"[^\w-]", "", str(p.get("source") or "ai").lower()) or "ai"
+    if transcript:
+        write_transcript(vault, f"{sessions}/Transcripts/{name}.md", transcript, name, tool, p["session_id"])
+    touched = [path]  # transcripts stay out of the read mirror; the log lines below check for themselves
     if daily_log:
         daily = daily_note(vault, p["date"], p.get("start") or "00:00")
         text = daily.read_text(encoding="utf-8")
@@ -327,7 +367,8 @@ def apply_note(vault, w, cfg):
 
 def apply(vault, w, cfg, args):
     if w["kind"] == "session":
-        return apply_session(vault, w, cfg, args.daily_log, args.project_log)
+        fetch = None if getattr(args, "no_transcripts", False) else getattr(args, "fetch_transcript", None)
+        return apply_session(vault, w, cfg, args.daily_log, args.project_log, fetch)
     if w["kind"] == "note":
         return apply_note(vault, w, cfg)
     raise Refused(f"this applier doesn't know writes of kind {w['kind']}; update it")
@@ -356,6 +397,7 @@ def main():
     p.add_argument("--token-file", help="file holding the sync token (default: TALISMAN_SYNC_TOKEN)")
     p.add_argument("--daily-log", action="store_true", help="add a link line to the daily note's ## Log")
     p.add_argument("--project-log", action="store_true", help="add a link line to the project note's ## Log")
+    p.add_argument("--no-transcripts", action="store_true", help="don't save captured chats' transcripts in the vault")
     p.add_argument("--once", action="store_true", help="apply what is waiting, then exit")
     p.add_argument("--state-dir", default=os.path.expanduser("~/.local/state/talisman"))
     a = p.parse_args()
@@ -376,6 +418,7 @@ def main():
     except BlockingIOError:
         raise SystemExit("Another applier is already running for this machine.")
 
+    a.fetch_transcript = lambda cid: fetch_text(url, token, f"/api/applier/transcript/{cid}")
     name, backoff = socket.gethostname()[:60], 5
     log(f"applying writes into {vault}" + (" (once)" if a.once else ""))
     while True:

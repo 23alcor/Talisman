@@ -5,7 +5,7 @@ import { localNow } from './config.js';
 import { ToolError } from './tools.js';
 import { BadNotes, upsertNotes } from './sync.js';
 
-const CATEGORIES = ['coding', 'study', 'research', 'writing', 'planning', 'meeting', 'call', 'interview', 'lecture', 'other'];
+export const CATEGORIES = ['coding', 'study', 'research', 'writing', 'planning', 'meeting', 'call', 'interview', 'lecture', 'other'];
 const MAX_QUEUE = 500;      // waiting writes before new ones are refused
 const MAX_ATTEMPTS = 5;     // applier tries per write
 const LEASE_MS = 2 * 60e3;  // how long a claimed write is reserved for the applier
@@ -54,6 +54,9 @@ const noSecrets = (...parts) => {
   const text = JSON.stringify(parts);
   if (SECRETS.some((re) => re.test(text))) throw new ToolError('This looks like it contains a password, key or token. Remove it and try again: Talisman never saves secrets.');
 };
+// For captured chats, where refusing isn't an option: blank out anything shaped like a secret.
+const SECRETS_ALL = SECRETS.map((re) => new RegExp(re.source, re.flags.includes('g') ? re.flags : re.flags + 'g'));
+export const redactSecrets = (text) => SECRETS_ALL.reduce((t, re) => t.replace(re, '[REDACTED]'), text);
 
 const BAD_NAME = /[\x00-\x1f\x7f\\/:#^|\[\]?*"<>]/;
 const SYSTEM_FOLDER = /^(templates|attachments|transcripts|daily notes|daily)$/i;
@@ -90,6 +93,27 @@ function message(row, writing) {
     + 'This write is queued and will be saved when it is back; reading still works. Tell them it is queued, not saved.';
 }
 
+// Put a write in the queue. An older update of the same key that hasn't been applied yet is replaced, not applied.
+export async function enqueueWrite(env, { kind, key, revision, payload, source }) {
+  const db = env.DB;
+  const waiting = await db.prepare("SELECT COUNT(*) AS n FROM writes WHERE status IN ('queued', 'applying')").first('n');
+  if (waiting >= MAX_QUEUE) throw new ToolError('Too many writes are waiting for the vault machine. Try again once it has caught up.');
+  if (revision === undefined) revision = ((await db.prepare('SELECT MAX(revision) AS r FROM writes WHERE key = ?1').bind(key).first('r')) || 0) + 1;
+  const id = 'w_' + crypto.randomUUID().replace(/-/g, '').slice(0, 20);
+  const now = new Date().toISOString();
+  try {
+    await db.batch([
+      db.prepare("UPDATE writes SET status = 'superseded', done_at = ?2 WHERE key = ?1 AND status = 'queued'").bind(key, now),
+      db.prepare('INSERT INTO writes (id, kind, key, revision, payload, source, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)')
+        .bind(id, kind, key, revision, JSON.stringify(payload), source || null, now),
+    ]);
+  } catch (e) {
+    if (/UNIQUE/i.test(String(e?.message))) throw new ToolError('Another update to this session arrived at the same moment. Send it again.');
+    throw e;
+  }
+  return db.prepare('SELECT * FROM writes WHERE id = ?1').bind(id).first();
+}
+
 export function writeTools(env, cfg) {
   const db = env.DB;
   const byId = (id) => db.prepare('SELECT * FROM writes WHERE id = ?1').bind(id).first();
@@ -106,24 +130,7 @@ export function writeTools(env, cfg) {
     return { ...view(row), writing, message: message(row, writing) };
   }
 
-  async function enqueue({ kind, key, revision, payload, source }) {
-    const waiting = await db.prepare("SELECT COUNT(*) AS n FROM writes WHERE status IN ('queued', 'applying')").first('n');
-    if (waiting >= MAX_QUEUE) throw new ToolError('Too many writes are waiting for the vault machine. Try again once it has caught up.');
-    const id = 'w_' + crypto.randomUUID().replace(/-/g, '').slice(0, 20);
-    const now = new Date().toISOString();
-    try {
-      await db.batch([
-        // An older update of the same session that hasn't been applied yet is replaced, not applied.
-        db.prepare("UPDATE writes SET status = 'superseded', done_at = ?2 WHERE key = ?1 AND status = 'queued'").bind(key, now),
-        db.prepare('INSERT INTO writes (id, kind, key, revision, payload, source, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)')
-          .bind(id, kind, key, revision, JSON.stringify(payload), source || null, now),
-      ]);
-    } catch (e) {
-      if (/UNIQUE/i.test(String(e?.message))) throw new ToolError('Another update to this session arrived at the same moment. Send it again.');
-      throw e;
-    }
-    return byId(id);
-  }
+  const enqueue = (w) => enqueueWrite(env, w);
 
   return {
     async log_session(a) {
@@ -214,6 +221,13 @@ async function claim(env) {
 }
 
 export async function applierApi(req, env, url, cfg) {
+  // GET /api/applier/transcript/<capture_id>: a captured chat's transcript, fetched apart from the write so the queue stays light
+  const t = url.pathname.match(/^\/api\/applier\/transcript\/([A-Za-z0-9._:-]{8,100})$/);
+  if (t && req.method === 'GET') {
+    const text = await env.DB.prepare('SELECT transcript FROM captures WHERE id = ?1').bind(t[1]).first('transcript');
+    return text === null ? json({ error: 'unknown capture' }, 404)
+      : new Response(text, { headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' } });
+  }
   if (req.method !== 'POST') return json({ error: 'not found' }, 404);
   const b = await req.json().catch(() => null);
   if (!b || typeof b !== 'object') return json({ error: 'send a JSON body' }, 400);

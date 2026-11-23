@@ -5,12 +5,14 @@
 //   /login, /logout        owner sign-in (only needed for OAuth)
 //   /api/sync/notes        read mirror updates from the sync client (bearer SYNC_TOKEN)
 //   /api/applier/*         the write queue's applier on the vault machine (bearer SYNC_TOKEN)
+//   /api/capture           coding agents' chats from the capture hook (bearer TALISMAN_TOKEN); a cron summarizes quiet ones
 //   /health                liveness check
 import { AuthorizationError, CimdFetchError, OAuthProvider } from '@cloudflare/workers-oauth-provider';
 import { config } from './config.js';
 import { mcp } from './mcp.js';
 import { syncNotes } from './sync.js';
 import { applierApi } from './writes.js';
+import { receiveCapture, summarizeDue } from './capture.js';
 import {
   authConfigured, bearer, checkPassword, clearFailures, consentPage, lockedOut, loginPage, recordFailure,
   safeNext, sameText, sessionCookie, signedIn, statusPage,
@@ -119,6 +121,10 @@ export default {
         if (!env.SYNC_TOKEN || !sameText(bearer(req), env.SYNC_TOKEN)) return secure(json({ error: 'unauthorized' }, 401));
         return secure(url.pathname === '/api/sync/notes' ? await syncNotes(req, env) : await applierApi(req, env, url, config(env)));
       }
+      if (url.pathname === '/api/capture') { // coding agents' capture hooks (bearer TALISMAN_TOKEN)
+        if (!env.TALISMAN_TOKEN || !sameText(bearer(req), env.TALISMAN_TOKEN)) return secure(json({ error: 'unauthorized' }, 401));
+        return secure(await receiveCapture(req, env, ctx, config(env)));
+      }
       if (OAUTH_PATH.test(url.pathname)) {
         if (url.pathname === '/mcp' && env.TALISMAN_TOKEN && sameText(bearer(req), env.TALISMAN_TOKEN)) return secure(await mcp(req, env, config(env)));
         if (!env.OAUTH_KV) return secure(json({ error: url.pathname === '/mcp' ? 'unauthorized' : 'not found' }, url.pathname === '/mcp' ? 401 : 404));
@@ -139,5 +145,9 @@ export default {
       console.error('request failed', url.pathname, e);
       return secure(json({ error: 'server error' }, 500));
     }
+  },
+  // Cron trigger (wrangler.jsonc → triggers.crons): summarize captured chats that have gone quiet.
+  async scheduled(controller, env, ctx) {
+    ctx.waitUntil(summarizeDue(env, config(env)).catch((e) => console.error('capture sweep failed', e)));
   },
 };

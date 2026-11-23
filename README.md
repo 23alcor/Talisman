@@ -133,6 +133,35 @@ WantedBy=default.target
 
 After updating Talisman, run `npm run db:migrate` before `npm run deploy`.
 
+**6. Capture coding agents' chats**
+
+A hook sends each Claude Code or Codex chat to Talisman as it grows. It sends only what you and the assistant wrote: no tool output or injected system text, `<private>` spans removed, and anything shaped like a key, token or password redacted. After a chat has been quiet for 10 minutes, or has ended, Talisman summarizes it and the applier saves it as a session note with the transcript linked. As the chat continues, that same note is updated.
+
+Summaries need a model. Set `SUMMARY_MODEL` in `wrangler.jsonc`, then add the key:
+
+```sh
+npx wrangler secret put OPENAI_API_KEY          # or any provider with an OpenAI-compatible Responses API (SUMMARY_BASE_URL)
+```
+
+Claude Code: add the hook to `~/.claude/settings.json`, for both `Stop` and `SessionEnd`:
+
+```json
+{ "hooks": {
+  "Stop":       [{ "hooks": [{ "type": "command", "async": true, "timeout": 60,
+                   "command": "python3 /path/to/Talisman/capture/talisman-capture.py claude-code --url https://talisman.YOU.workers.dev" }] }],
+  "SessionEnd": [{ "hooks": [{ "type": "command", "async": true, "timeout": 60,
+                   "command": "python3 /path/to/Talisman/capture/talisman-capture.py claude-code --url https://talisman.YOU.workers.dev" }] }]
+} }
+```
+
+Codex: in `~/.codex/config.toml`:
+
+```toml
+notify = ["python3", "/path/to/Talisman/capture/talisman-capture.py", "codex", "--url", "https://talisman.YOU.workers.dev"]
+```
+
+The hook reads the token from `~/.config/talisman/mcp-token`. `TALISMAN_CAPTURE=off` turns it off. `TALISMAN_CAPTURE_SKIP=/path/a:/path/b` never sends chats that ran in those folders. Chats under 1200 characters are skipped. If Talisman can't be reached, the hook tries again on its next run. It never slows or fails the agent, and its log is in `~/.local/state/talisman/capture.log`. To see exactly what would be sent for a chat, without sending anything: `python3 capture/talisman-capture.py build claude-code <chat file>`.
+
 ### Development
 
 ```sh
@@ -146,7 +175,7 @@ npm run db:migrate:local && npm run dev
 
 1. ~~Connector and read mirror~~ (done)
 2. ~~Write queue, applier, and the "writes paused" flow~~ (done: session notes and new notes; handoffs next)
-3. Capture hooks for Claude Code and Codex
+3. ~~Capture hooks for Claude Code and Codex~~ (done)
 4. Health: heartbeats, a status page and alerts that don't depend on your home machine
 5. Search by meaning, not just keywords
 6. Encrypted backups

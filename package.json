@@ -11,7 +11,7 @@
     "db:migrate": "wrangler d1 migrations apply talisman --remote",
     "db:migrate:local": "wrangler d1 migrations apply talisman --local",
     "set-password": "node scripts/set-password.mjs",
-    "test": "node --import ./test/shims.mjs --test test/*.test.mjs && python3 -B -m unittest discover -s sync"
+    "test": "node --import ./test/shims.mjs --test test/*.test.mjs && python3 -B -m unittest discover -s sync && python3 -B -m unittest discover -s capture"
   },
   "engines": {
     "node": ">=22.13"
