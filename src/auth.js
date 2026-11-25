@@ -70,8 +70,10 @@ export async function recordFailure(env, ip) {
 }
 export const clearFailures = (env, ip) => env.DB.prepare('DELETE FROM auth_failures WHERE ip = ?1').bind(ip).run();
 
-// Only same-site relative paths, so the sign-in form can't be used as an open redirect.
-export const safeNext = (next) => (typeof next === 'string' && next.startsWith('/') && !next.startsWith('//') && !next.startsWith('/\\') && !next.startsWith('/login') ? next : '/');
+// Only same-site relative paths, so the sign-in form can't be used as an open redirect. Control characters are
+// refused because browsers strip tabs and newlines from URLs, which would turn '/\t/evil.example' into '//evil.example'.
+export const safeNext = (next) => (typeof next === 'string' && next.startsWith('/') && !next.startsWith('//') && !next.startsWith('/\\')
+  && !next.startsWith('/login') && !/[\x00-\x1f\x7f]/.test(next) ? next : '/');
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 

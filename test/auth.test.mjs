@@ -32,7 +32,7 @@ test('password hashes check out, and wrong or malformed ones fail', async () => 
 
 test('safeNext only allows same-site paths', () => {
   for (const ok of ['/', '/authorize?x=1']) assert.equal(safeNext(ok), ok);
-  for (const bad of ['https://evil.example', '//evil.example', '/\\evil.example', 'authorize', '/login?next=/', undefined]) assert.equal(safeNext(bad), '/');
+  for (const bad of ['https://evil.example', '//evil.example', '/\\evil.example', 'authorize', '/login?next=/', '/\t/evil.example', '/\n/evil.example', '/\r\n/evil.example', undefined]) assert.equal(safeNext(bad), '/');
 });
 
 test('sign-in: right password sets a session cookie, wrong ones are counted and locked out', async () => {
